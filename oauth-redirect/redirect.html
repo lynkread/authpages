@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LynkGrids OAuth - Redirecting...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+        }
+
+        h1 {
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            margin: 20px auto;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .status {
+            margin-top: 20px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .error {
+            color: #ffcdd2;
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(244, 67, 54, 0.2);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .success {
+            color: #c8e6c9;
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(76, 175, 80, 0.2);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LynkGrids OAuth</h1>
+        <div class="spinner"></div>
+        <div class="status" id="status">Completing authentication...</div>
+    </div>
+
+    <script>
+        (function() {
+            const statusEl = document.getElementById('status');
+
+            try {
+                // Parse URL parameters
+                const urlParams = new URLSearchParams(window.location.search);
+                const code = urlParams.get('code');
+                const state = urlParams.get('state');
+                const error = urlParams.get('error');
+
+                console.log('[OAuth Redirect] URL params:', {
+                    hasCode: !!code,
+                    hasState: !!state,
+                    error
+                });
+
+                if (error) {
+                    statusEl.className = 'error';
+                    statusEl.textContent = `Authentication error: ${error}`;
+                    console.error('[OAuth Redirect] OAuth error:', error);
+
+                    // Send error to extension
+                    if (window.opener) {
+                        window.opener.postMessage({
+                            type: 'OAUTH_CALLBACK',
+                            error: error
+                        }, '*');
+                    }
+
+                    // Also try chrome.runtime for extension
+                    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                        chrome.runtime.sendMessage({
+                            type: 'OAUTH_CALLBACK',
+                            error: error
+                        });
+                    }
+
+                    setTimeout(() => window.close(), 3000);
+                    return;
+                }
+
+                if (!code) {
+                    statusEl.className = 'error';
+                    statusEl.textContent = 'No authorization code received';
+                    console.error('[OAuth Redirect] No code in URL');
+
+                    if (window.opener) {
+                        window.opener.postMessage({
+                            type: 'OAUTH_CALLBACK',
+                            error: 'no_code'
+                        }, '*');
+                    }
+
+                    setTimeout(() => window.close(), 3000);
+                    return;
+                }
+
+                if (!state) {
+                    statusEl.className = 'error';
+                    statusEl.textContent = 'No state parameter received';
+                    console.error('[OAuth Redirect] No state in URL');
+
+                    if (window.opener) {
+                        window.opener.postMessage({
+                            type: 'OAUTH_CALLBACK',
+                            error: 'no_state'
+                        }, '*');
+                    }
+
+                    setTimeout(() => window.close(), 3000);
+                    return;
+                }
+
+                console.log('[OAuth Redirect] Sending code to extension...');
+                statusEl.className = 'success';
+                statusEl.textContent = 'Authentication successful! Closing window...';
+
+                // Send authorization code back to extension opener
+                if (window.opener) {
+                    console.log('[OAuth Redirect] Sending via window.opener.postMessage');
+                    window.opener.postMessage({
+                        type: 'OAUTH_CALLBACK',
+                        code: code,
+                        state: state
+                    }, '*');
+                }
+
+                // Also try chrome.runtime for extension context
+                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                    console.log('[OAuth Redirect] Sending via chrome.runtime.sendMessage');
+                    chrome.runtime.sendMessage({
+                        type: 'OAUTH_CALLBACK',
+                        code: code,
+                        state: state
+                    });
+                }
+
+                // Close window after a short delay
+                setTimeout(() => {
+                    console.log('[OAuth Redirect] Closing window');
+                    window.close();
+                }, 1500);
+
+            } catch (err) {
+                console.error('[OAuth Redirect] Error processing callback:', err);
+                statusEl.className = 'error';
+                statusEl.textContent = `Error: ${err.message}`;
+
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'OAUTH_CALLBACK',
+                        error: err.message
+                    }, '*');
+                }
+
+                setTimeout(() => window.close(), 3000);
+            }
+        })();
+    </script>
+</body>
+</html>
