@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinkedIn Connection - LynkGrids</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 400px;
+      width: 100%;
+      padding: 40px;
+      text-align: center;
+      opacity: 0;
+      animation: fadeIn 0.3s ease-in forwards;
+    }
+
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      margin: 0 auto 20px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .success-icon { color: #28a745; }
+    .error-icon { color: #dc3545; }
+
+    h1 {
+      color: #333;
+      font-size: 20px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    p {
+      color: #666;
+      line-height: 1.5;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .username {
+      color: #667eea;
+      font-weight: 600;
+    }
+
+    .auto-close-text {
+      color: #999;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="spinner" class="spinner"></div>
+    <div id="status">
+      <h1>Processing...</h1>
+      <p>Connecting your LinkedIn account</p>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * LinkedIn OAuth Callback Handler - Silent Mode
+     * Processes callback in background and closes automatically
+     */
+
+    // Try multiple possible extension IDs
+    const EXTENSION_IDS = [
+      'gfdmjgodlaalpcbacmjokcgndnehoecl', // Production
+      // Add more extension IDs here if needed for development/testing
+    ];
+
+    (async function() {
+      const spinner = document.getElementById('spinner');
+      const statusDiv = document.getElementById('status');
+
+      try {
+        // Parse URL parameters from Unipile
+        // account_id comes from query string: ?account_id=xxx
+        const urlParams = new URLSearchParams(window.location.search);
+        const accountId = urlParams.get('account_id');
+
+        // state and error come from hash fragment: #state=xxx&error=yyy
+        // This is because Unipile overwrites query params but preserves hash
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const state = hashParams.get('state');
+        const error = hashParams.get('error');
+
+        console.log('[LinkedIn Callback] URL:', window.location.href);
+        console.log('[LinkedIn Callback] Query string:', window.location.search);
+        console.log('[LinkedIn Callback] Hash:', window.location.hash);
+        console.log('[LinkedIn Callback] Parsed params:', { state, accountId, error });
+
+        if (!state) {
+          throw new Error('Missing state parameter. Invalid callback URL.');
+        }
+
+        // Try sending message to each possible extension ID
+        let response = null;
+        let successfulExtensionId = null;
+
+        for (const extensionId of EXTENSION_IDS) {
+          try {
+            console.log(`[LinkedIn Callback] Trying extension ID: ${extensionId}`);
+            response = await chrome.runtime.sendMessage(extensionId, {
+              type: 'LINKEDIN_CALLBACK',
+              data: {
+                state,
+                account_id: accountId,
+                error
+              }
+            });
+
+            if (response) {
+              successfulExtensionId = extensionId;
+              console.log(`[LinkedIn Callback] Success with extension ID: ${extensionId}`);
+              break;
+            }
+          } catch (err) {
+            console.log(`[LinkedIn Callback] Failed with extension ID ${extensionId}:`, err.message);
+            // Continue to next ID
+          }
+        }
+
+        if (!response) {
+          throw new Error('Could not connect to extension. Please ensure LynkGrids extension is installed and enabled.');
+        }
+
+        console.log('[LinkedIn Callback] Response:', response);
+
+        // Hide spinner
+        spinner.style.display = 'none';
+
+        if (response && response.success) {
+          // Success - show brief message and auto-close
+          statusDiv.innerHTML = `
+            <div class="icon success-icon">✓</div>
+            <h1>Success!</h1>
+            <p>LinkedIn account <span class="username">@${response.username}</span> connected</p>
+            <p class="auto-close-text">You can close this window now</p>
+          `;
+
+          // Auto-close after 3 seconds
+          setTimeout(() => {
+            window.close();
+          }, 3000);
+        } else {
+          // Error - show message and auto-close
+          const errorMessage = response?.error || 'Connection failed';
+          statusDiv.innerHTML = `
+            <div class="icon error-icon">✕</div>
+            <h1>Error</h1>
+            <p style="color: #c62828;">${errorMessage}</p>
+            <p class="auto-close-text">Closing in 3 seconds...</p>
+          `;
+
+          setTimeout(() => {
+            window.close();
+          }, 3000);
+        }
+      } catch (error) {
+        console.error('[LinkedIn Callback] Error:', error);
+
+        // Hide spinner
+        spinner.style.display = 'none';
+
+        // Build detailed error message
+        let errorDetails = error.message || 'Connection failed';
+
+        // Add debugging info for extension connection issues
+        if (error.message && error.message.includes('Could not connect to extension')) {
+          errorDetails += '<br><br><small style="font-size: 11px; color: #999;">Debugging Info:<br>';
+          errorDetails += `Tried extension IDs: ${EXTENSION_IDS.join(', ')}<br>`;
+          errorDetails += 'Please ensure:<br>';
+          errorDetails += '1. Extension is installed and enabled<br>';
+          errorDetails += '2. Extension ID matches in manifest.json<br>';
+          errorDetails += '3. Check browser console for details</small>';
+        }
+
+        // Show brief error and auto-close
+        statusDiv.innerHTML = `
+          <div class="icon error-icon">✕</div>
+          <h1>Error</h1>
+          <p style="color: #c62828;">${errorDetails}</p>
+          <p class="auto-close-text">Window will stay open for debugging. Check console for details.</p>
+        `;
+
+        // Don't auto-close on error - let user see the message
+        console.log('[LinkedIn Callback] Error occurred, window will stay open for debugging');
+      }
+    })();
+  </script>
+</body>
+</html>
